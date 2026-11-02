@@ -1,0 +1,95 @@
+name: TestFlight
+run-name: TestFlight ${{ inputs.build }} ${{ inputs.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: jade-on-mesh/meshcore-open-tak commit
+        required: true
+      build:
+        description: Build number, higher than every earlier upload (YYYYMMDDHH)
+        required: true
+
+concurrency: testflight
+
+permissions:
+  contents: read
+
+env:
+  BUNDLE_ID: com.akelly.meshcoreopentak
+  TEAM_ID: T3TBGN4UX7
+  ASC_KEY_ID: ZT4M83BNFY
+  ASC_ISSUER_ID: 1572e43c-4c24-4268-b52e-3f9460b87529
+
+jobs:
+  testflight:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: jade-on-mesh/meshcore-open-tak
+          ref: ${{ inputs.sha }}
+          path: app
+          fetch-depth: 0
+      - name: Merge patch branches
+        working-directory: app
+        run: |
+          git config user.name testflight
+          git config user.email testflight@users.noreply.github.com
+          for branch in $(sed 's/#.*//' ../patches.txt); do
+            git fetch --quiet https://github.com/ahalekelly/meshcore-open-tak.git "$branch"
+            git merge --no-edit FETCH_HEAD
+          done
+      - name: Use our bundle ID and team
+        working-directory: app/ios
+        run: |
+          grep -q 'com\.monitormx\.meshcoreopen' Runner.xcodeproj/project.pbxproj
+          grep -q X74VJ4UAST Runner.xcodeproj/project.pbxproj
+          sed -i '' -e "s/com\.monitormx\.meshcoreopen/$BUNDLE_ID/g" -e "s/X74VJ4UAST/$TEAM_ID/g" Runner.xcodeproj/project.pbxproj
+      - id: flutter
+        run: echo "version=$(tr -d '[:space:]' < app/.flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.flutter.outputs.version }}
+          channel: stable
+          cache: true
+      - uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.DIST_CERT_P12 }}
+          p12-password: ${{ secrets.DIST_CERT_PASSWORD }}
+      - name: Build, sign and upload
+        working-directory: app
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          SHA: ${{ inputs.sha }}
+          BUILD: ${{ inputs.build }}
+        run: |
+          key="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          printf '%s\n' "$ASC_KEY_P8" > "$key"
+          version=$(sed -n 's/^version: *\([0-9.]*\).*/\1/p' pubspec.yaml)
+          flutter build ios --config-only --release --build-name="$version" --build-number="$BUILD" \
+            --dart-define=APP_VERSION="$version-tak" --dart-define=APP_BUILD="$BUILD" \
+            --dart-define=APP_BUILD_DATE="$(date -u '+%d %b %Y')" --dart-define=APP_COMMIT="${SHA::7}"
+          # Export signs for distribution; signing the archive would need a development certificate.
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release \
+            -destination generic/platform=iOS -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO archive
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+          # Homebrew's rsync breaks exportArchive ("Copy failed"); Xcode needs /usr/bin/rsync.
+          PATH=/usr/bin:$PATH xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Runner.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -allowProvisioningUpdates -authenticationKeyPath "$key" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
