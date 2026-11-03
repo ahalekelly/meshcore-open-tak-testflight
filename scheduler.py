@@ -60,9 +60,12 @@ def asc(method, path, body=None):
 
 
 def notify(title, body):
+    owner = ("First list the T3 threads active in the last 24 hours on every linked machine and see whether one of "
+             "them is working on the MeshCore TestFlight release or caused this. If one is, send it this report with "
+             "t3_thread_send and stop, without re-running anything.\n\n")
     subprocess.run([Path.home() / ".local/bin/uv", "run", "--quiet", Path.home() / ".agents/bin/t3-thread.py",
                     "new", CHECKOUT, title, "claudeAgent", "claude-opus-5-5", "/dev/stdin"],
-                   input=body, text=True, check=True)
+                   input=owner + body, text=True, check=True)
 
 
 def workflow_runs():
