@@ -49,6 +49,8 @@ jobs:
           grep -q 'com\.monitormx\.meshcoreopen' Runner.xcodeproj/project.pbxproj
           grep -q X74VJ4UAST Runner.xcodeproj/project.pbxproj
           sed -i '' -e "s/com\.monitormx\.meshcoreopen/$BUNDLE_ID/g" -e "s/X74VJ4UAST/$TEAM_ID/g" Runner.xcodeproj/project.pbxproj
+      - name: Build libaom (photo messages)
+        run: app/third_party/vox_av1/build-aom-apple.sh
       - id: flutter
         run: echo "version=$(tr -d '[:space:]' < app/.flutter-version)" >> "$GITHUB_OUTPUT"
       - uses: subosito/flutter-action@v2
