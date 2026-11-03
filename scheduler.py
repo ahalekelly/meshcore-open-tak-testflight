@@ -83,8 +83,8 @@ def patches(run):
     return [line.partition("#")[2].strip() for line in text.splitlines() if line.strip() and not line.startswith("#")]
 
 
-def whats_new(run, runs):
-    previous = next((r for r in runs if r["conclusion"] == "success" and r["createdAt"] < run["createdAt"]), None)
+def whats_new(run, previous):
+    """Release notes for run's build, against previous, the run of the build Community testers have now."""
     short = run["sha"][:7]
     fixes = patches(run)
     if previous and previous["sha"] == run["sha"] and patches(previous) == fixes:
@@ -115,7 +115,10 @@ def distribute(builds, runs):
     if detail["attributes"]["externalBuildState"] != "READY_FOR_BETA_SUBMISSION" or states & IN_REVIEW:
         return
     run = next(r for r in runs if r["build"] == attributes["version"] and r["conclusion"] == "success")
-    text = whats_new(run, runs)
+    given = [b["attributes"]["version"] for b in builds["data"][1:]
+             if any(g["id"] == COMMUNITY_GROUP for g in b["relationships"]["betaGroups"]["data"])]
+    previous = next((r for r in runs if given and r["build"] == given[0] and r["conclusion"] == "success"), None)
+    text = whats_new(run, previous)
     localizations = asc("GET", f"/v1/builds/{build['id']}/betaBuildLocalizations")["data"]
     if localizations:
         asc("PATCH", f"/v1/betaBuildLocalizations/{localizations[0]['id']}",
@@ -145,9 +148,9 @@ def release(state):
                "get Adrian's approval before pushing to them. Report upstream causes, and draft any upstream "
                "issue or PR for Adrian to approve.")
         state["reported"] = run["databaseId"]
-    builds = asc("GET", f"/v1/builds?filter[app]={APP_ID}&sort=-uploadedDate&limit=10&include=buildBetaDetail"
-                        "&fields[builds]=version,uploadedDate,processingState,usesNonExemptEncryption,expired,"
-                        "buildBetaDetail")
+    builds = asc("GET", f"/v1/builds?filter[app]={APP_ID}&sort=-uploadedDate&limit=10"
+                        "&include=buildBetaDetail,betaGroups&fields[builds]=version,uploadedDate,processingState,usesNonExemptEncryption,expired,"
+                        "buildBetaDetail,betaGroups")
     distribute(builds, runs)
     if any(r["status"] != "completed" for r in runs):
         return
