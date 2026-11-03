@@ -13,6 +13,7 @@ Each run:
   manual run or a newer upstream commit.
 """
 
+import base64
 import json
 import socket
 import subprocess
@@ -67,24 +68,33 @@ def notify(title, body):
 def workflow_runs():
     """TestFlight runs, newest first, each with the build number and commit from its name."""
     runs = gh("run", "list", "-R", REPO, "-w", WORKFLOW, "-L", "50",
-              "--json", "databaseId,displayTitle,status,conclusion,url,createdAt")
+              "--json", "databaseId,displayTitle,status,conclusion,url,createdAt,headSha")
     for run in runs:
         _, run["build"], run["sha"] = run["displayTitle"].split()
     return runs
 
 
+def patches(run):
+    """What each patch branch the run merged adds, from the comments in its patches.txt."""
+    text = base64.b64decode(gh("api", f"repos/{REPO}/contents/patches.txt?ref={run['headSha']}")["content"]).decode()
+    return [line.partition("#")[2].strip() for line in text.splitlines() if line.strip() and not line.startswith("#")]
+
+
 def whats_new(run, runs):
-    previous = next((r["sha"] for r in runs if r["conclusion"] == "success" and r["createdAt"] < run["createdAt"]),
-                    None)
+    previous = next((r for r in runs if r["conclusion"] == "success" and r["createdAt"] < run["createdAt"]), None)
     short = run["sha"][:7]
-    if previous is None:
-        return f"Built from {UPSTREAM} at {short}."
-    if previous == run["sha"]:
+    fixes = patches(run)
+    if previous and previous["sha"] == run["sha"] and patches(previous) == fixes:
         return f"Rebuild of {short}, unchanged, so the beta doesn't expire."
-    commits = gh("api", f"repos/{UPSTREAM}/compare/{previous}...{run['sha']}")["commits"]
-    subjects = [c["commit"]["message"].splitlines()[0].removesuffix(" [format]") for c in commits]
-    lines = [f"- {s}" for s in reversed(subjects) if not s.startswith(NOT_NEWS)]
-    return f"Changes in {UPSTREAM} up to {short}:\n" + "\n".join(lines)[:3800]
+    lines = ["Not yet in upstream:", *[f"- {f}" for f in fixes]] if fixes else []
+    if previous is None or previous["sha"] == run["sha"]:
+        lines.append(f"Built from {UPSTREAM} at {short}.")
+    else:
+        commits = gh("api", f"repos/{UPSTREAM}/compare/{previous['sha']}...{run['sha']}")["commits"]
+        subjects = [c["commit"]["message"].splitlines()[0].removesuffix(" [format]") for c in commits]
+        lines += [f"Changes in {UPSTREAM} up to {short}:",
+                  *[f"- {s}" for s in reversed(subjects) if not s.startswith(NOT_NEWS)]]
+    return "\n".join(lines)[:4000]
 
 
 def distribute(builds, runs):
