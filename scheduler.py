@@ -149,8 +149,8 @@ def release(state):
                "issue or PR for Adrian to approve.")
         state["reported"] = run["databaseId"]
     builds = asc("GET", f"/v1/builds?filter[app]={APP_ID}&sort=-uploadedDate&limit=10"
-                        "&include=buildBetaDetail,betaGroups&fields[builds]=version,uploadedDate,processingState,usesNonExemptEncryption,expired,"
-                        "buildBetaDetail,betaGroups")
+                        "&include=buildBetaDetail,betaGroups&fields[builds]=version,uploadedDate,processingState,"
+                        "usesNonExemptEncryption,expired,buildBetaDetail,betaGroups")
     distribute(builds, runs)
     if any(r["status"] != "completed" for r in runs):
         return
