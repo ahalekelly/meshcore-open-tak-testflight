@@ -1,4 +1,4 @@
 # Branches of ahalekelly/meshcore-open-tak merged onto upstream before each build, in order.
 # Each is the head of an open upstream PR; drop it once the PR merges.
 # The comment after each branch tells testers what it adds, in the build's What to Test notes.
-ios-background-location  # iOS: team location sharing keeps going in the background, and Save Image works
+ios-background-location  # PR #165. iOS: team location sharing keeps going in the background, and Save Image works
