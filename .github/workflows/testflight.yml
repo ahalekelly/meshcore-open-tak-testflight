@@ -49,8 +49,30 @@ jobs:
           grep -q 'com\.monitormx\.meshcoreopen' Runner.xcodeproj/project.pbxproj
           grep -q X74VJ4UAST Runner.xcodeproj/project.pbxproj
           sed -i '' -e "s/com\.monitormx\.meshcoreopen/$BUNDLE_ID/g" -e "s/X74VJ4UAST/$TEAM_ID/g" Runner.xcodeproj/project.pbxproj
-      - name: Build libaom (photo messages)
-        run: app/third_party/vox_av1/build-aom-apple.sh
+      # Photo messages: the vox_av1 pod links libaom from aom-ios/, as in upstream's build.yml.
+      - name: Cache libaom
+        id: aom
+        uses: actions/cache@v4
+        with:
+          path: app/third_party/vox_av1/aom-ios
+          key: aom-ios-v3.12.1-arm64-1
+      - name: Build libaom
+        if: steps.aom.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/aom.tgz https://raw.githubusercontent.com/jade-on-mesh/meshcore-open-tak/deps-cache/aom-v3.12.1.tar.gz
+          echo "76558ad5918820d66fa78460d9957e5bbf7cf9eef1a5421b5ba5e616f200d76e  /tmp/aom.tgz" | shasum -a 256 -c
+          tar xzf /tmp/aom.tgz -C /tmp
+          cmake -S /tmp/aom -B /tmp/aom-ios \
+            -DCMAKE_TOOLCHAIN_FILE=/tmp/aom/build/cmake/toolchains/arm64-ios.cmake \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.4 -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_DOCS=0 -DENABLE_EXAMPLES=0 -DENABLE_TESTS=0 -DENABLE_TESTDATA=0 \
+            -DENABLE_TOOLS=0 -DCONFIG_AV1_HIGHBITDEPTH=0 -DCONFIG_WEBM_IO=0
+          cmake --build /tmp/aom-ios -j"$(sysctl -n hw.ncpu)" --target aom
+          out=app/third_party/vox_av1/aom-ios
+          mkdir -p $out/lib $out/include/aom
+          cp /tmp/aom-ios/libaom.a $out/lib/
+          cp /tmp/aom/aom/*.h $out/include/aom/
       - id: flutter
         run: echo "version=$(tr -d '[:space:]' < app/.flutter-version)" >> "$GITHUB_OUTPUT"
       - uses: subosito/flutter-action@v2
