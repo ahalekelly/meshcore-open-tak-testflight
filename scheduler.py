@@ -9,12 +9,14 @@ Each run:
 - sends the newest processed build to the Community group and submits it for beta review once no other
   build is in review (Apple reviews one build per version at a time);
 - starts a build of upstream main once main has been quiet for 8 hours, or of unchanged main when the newest
-  upload is 60 days old (TestFlight builds expire after 90). A commit whose latest run failed waits for a
-  manual run or a newer upstream commit.
+  upload is 60 days old (TestFlight builds expire after 90);
+- otherwise starts a build of the newest release tag (v1.2.3) unless the newest successful build contains it.
+A commit whose latest run failed waits for a manual run or a newer upstream commit.
 """
 
 import base64
 import json
+import re
 import socket
 import subprocess
 import time
@@ -83,9 +85,9 @@ def patches(run):
     return [line.partition("#")[2].strip() for line in text.splitlines() if line.strip() and not line.startswith("#")]
 
 
-def whats_new(run, previous):
+def whats_new(run, previous, tags):
     """Release notes for run's build, against previous, the run of the build Community testers have now."""
-    short = run["sha"][:7]
+    short = tags.get(run["sha"], run["sha"][:7])
     fixes = patches(run)
     if previous and previous["sha"] == run["sha"] and patches(previous) == fixes:
         return f"Rebuild of {short}, unchanged, so the beta doesn't expire."
@@ -100,7 +102,7 @@ def whats_new(run, previous):
     return "\n".join(lines)[:4000]
 
 
-def distribute(builds, runs):
+def distribute(builds, runs, tags):
     """Send the newest build to testers once it has processed and no other build is in review."""
     build = builds["data"][0]
     attributes = build["attributes"]
@@ -118,7 +120,7 @@ def distribute(builds, runs):
     given = [b["attributes"]["version"] for b in builds["data"][1:]
              if any(g["id"] == COMMUNITY_GROUP for g in b["relationships"]["betaGroups"]["data"])]
     previous = next((r for r in runs if given and r["build"] == given[0] and r["conclusion"] == "success"), None)
-    text = whats_new(run, previous)
+    text = whats_new(run, previous, tags)
     localizations = asc("GET", f"/v1/builds/{build['id']}/betaBuildLocalizations")["data"]
     if localizations:
         asc("PATCH", f"/v1/betaBuildLocalizations/{localizations[0]['id']}",
@@ -151,17 +153,24 @@ def release(state):
     builds = asc("GET", f"/v1/builds?filter[app]={APP_ID}&sort=-uploadedDate&limit=10"
                         "&include=buildBetaDetail,betaGroups&fields[builds]=version,uploadedDate,processingState,"
                         "usesNonExemptEncryption,expired,buildBetaDetail,betaGroups")
-    distribute(builds, runs)
+    tags = dict(line.split() for line in subprocess.run(
+        ["gh", "api", "--paginate", f"repos/{UPSTREAM}/tags",
+         "--jq", '.[] | select(.name | test("^v[0-9]")) | .commit.sha + " " + .name'],
+        capture_output=True, text=True, check=True).stdout.splitlines())
+    distribute(builds, runs, tags)
     if any(r["status"] != "completed" for r in runs):
         return
     head = gh("api", f"repos/{UPSTREAM}/commits/main")
-    sha = head["sha"]
-    if runs and runs[0]["sha"] == sha and runs[0]["conclusion"] == "failure":
-        return
     built = next((r["sha"] for r in runs if r["conclusion"] == "success"), None)
     quiet = now() - datetime.fromisoformat(head["commit"]["committer"]["date"]) >= QUIET
     expiring = now() - datetime.fromisoformat(builds["data"][0]["attributes"]["uploadedDate"]) >= RENEW
-    if sha != built and quiet or expiring:
+    wanted = [head["sha"]] if head["sha"] != built and quiet or expiring else []
+    tag = max(tags, key=lambda sha: [int(n) for n in re.findall(r"\d+", tags[sha])], default=None)
+    if tag and gh("api", f"repos/{UPSTREAM}/compare/{tag}...{built}")["status"] in ("behind", "diverged"):
+        wanted.append(tag)
+    latest = {r["sha"]: r["conclusion"] for r in reversed(runs)}
+    sha = next((s for s in wanted if latest.get(s) != "failure"), None)
+    if sha:
         gh("workflow", "run", WORKFLOW, "-R", REPO, "-f", f"sha={sha}",
            "-f", f"build={now().strftime('%Y%m%d%H')}")
 

@@ -3,7 +3,7 @@
 Builds [jade-on-mesh/meshcore-open-tak](https://github.com/jade-on-mesh/meshcore-open-tak) for iOS and publishes it on TestFlight as `com.akelly.meshcoreopentak`. Join the beta at https://testflight.apple.com/join/TB4jspvT.
 
 - `.github/workflows/testflight.yml` builds an upstream commit with the branches in `patches.txt` merged in, signs it, and uploads it to App Store Connect.
-- `scheduler.py` runs every 15 minutes on akelly-desktop (`systemd/`). It starts a build once upstream main has been quiet for 8 hours, rebuilds before the newest build expires, sends each processed build to the Community group for beta review, and opens a T3 thread when a run fails. Its docstring has the details.
+- `scheduler.py` runs every 15 minutes on akelly-desktop (`systemd/`). It starts a build once upstream main has been quiet for 8 hours or upstream tags a release (`v1.2.3`), rebuilds before the newest build expires, sends each processed build to the Community group for beta review, and opens a T3 thread when a run fails. Its docstring has the details.
 
 Start a build by hand:
 
