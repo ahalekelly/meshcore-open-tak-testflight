@@ -8,10 +8,10 @@ Each run:
 - opens a T3 thread about a failed TestFlight workflow run, or about this script failing for an hour;
 - sends the newest processed build to the Community group and submits it for beta review once no other
   build is in review (Apple reviews one build per version at a time);
-- starts a build of upstream main once main has been quiet for 4 hours, or of unchanged main when the newest
-  upload is 60 days old (TestFlight builds expire after 90);
-- otherwise starts a build of the newest release tag (v1.2.3) unless the newest successful build contains it.
-A commit whose latest run failed waits for a manual run or a newer upstream commit.
+- once a day after 5 AM Pacific, when upstream is usually quiet, builds the newest release tag
+  (`v<version>-tak.<build>`, which upstream's Build workflow adds to each build it publishes) unless the newest
+  successful build contains it, or rebuilds it when the newest upload is 60 days old (TestFlight builds expire
+  after 90). A tag whose latest run failed waits for a manual run or the next day's tag.
 """
 
 import base64
@@ -23,6 +23,7 @@ import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import jwt
 import requests
@@ -34,7 +35,7 @@ APP_ID = "6829544641"
 COMMUNITY_GROUP = "926b32b7-db68-465e-a346-0ca769c778bc"
 KEY_ID, ISSUER = "ZT4M83BNFY", "1572e43c-4c24-4268-b52e-3f9460b87529"
 KEY = Path.home() / f".appstoreconnect/AuthKey_{KEY_ID}.p8"
-QUIET = timedelta(hours=4)
+DAILY = 5  # hour, Pacific
 RENEW = timedelta(days=60)
 CHECKOUT = Path(__file__).resolve().parent
 STATE = Path.home() / ".local/state/meshcore-testflight.json"
@@ -160,18 +161,18 @@ def release(state):
     distribute(builds, runs, tags)
     if any(r["status"] != "completed" for r in runs):
         return
-    head = gh("api", f"repos/{UPSTREAM}/commits/main")
-    built = next((r["sha"] for r in runs if r["conclusion"] == "success"), None)
-    quiet = now() - datetime.fromisoformat(head["commit"]["committer"]["date"]) >= QUIET
+    today = now().astimezone(ZoneInfo("America/Los_Angeles")).replace(hour=DAILY, minute=0, second=0, microsecond=0)
+    if now() < today:
+        today -= timedelta(days=1)
+    if datetime.fromisoformat(runs[0]["createdAt"]) >= today:
+        return
+    built = next(r["sha"] for r in runs if r["conclusion"] == "success")
+    tag = max(tags, key=lambda sha: [int(n) for n in re.findall(r"\d+", tags[sha])])
+    newer = gh("api", f"repos/{UPSTREAM}/compare/{tag}...{built}")["status"] in ("behind", "diverged")
     expiring = now() - datetime.fromisoformat(builds["data"][0]["attributes"]["uploadedDate"]) >= RENEW
-    wanted = [head["sha"]] if head["sha"] != built and quiet or expiring else []
-    tag = max(tags, key=lambda sha: [int(n) for n in re.findall(r"\d+", tags[sha])], default=None)
-    if tag and gh("api", f"repos/{UPSTREAM}/compare/{tag}...{built}")["status"] in ("behind", "diverged"):
-        wanted.append(tag)
-    latest = {r["sha"]: r["conclusion"] for r in reversed(runs)}
-    sha = next((s for s in wanted if latest.get(s) != "failure"), None)
-    if sha:
-        gh("workflow", "run", WORKFLOW, "-R", REPO, "-f", f"sha={sha}",
+    failed = next((r["conclusion"] for r in runs if r["sha"] == tag), None) == "failure"
+    if (newer or expiring) and not failed:
+        gh("workflow", "run", WORKFLOW, "-R", REPO, "-f", f"sha={tag}",
            "-f", f"build={now().strftime('%Y%m%d%H')}")
 
 
