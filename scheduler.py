@@ -8,7 +8,7 @@ Each run:
 - opens a T3 thread about a failed TestFlight workflow run, or about this script failing for an hour;
 - sends the newest processed build to the Community group and submits it for beta review once no other
   build is in review (Apple reviews one build per version at a time);
-- starts a build of upstream main once main has been quiet for 8 hours, or of unchanged main when the newest
+- starts a build of upstream main once main has been quiet for 4 hours, or of unchanged main when the newest
   upload is 60 days old (TestFlight builds expire after 90);
 - otherwise starts a build of the newest release tag (v1.2.3) unless the newest successful build contains it.
 A commit whose latest run failed waits for a manual run or a newer upstream commit.
@@ -34,7 +34,7 @@ APP_ID = "6829544641"
 COMMUNITY_GROUP = "926b32b7-db68-465e-a346-0ca769c778bc"
 KEY_ID, ISSUER = "ZT4M83BNFY", "1572e43c-4c24-4268-b52e-3f9460b87529"
 KEY = Path.home() / f".appstoreconnect/AuthKey_{KEY_ID}.p8"
-QUIET = timedelta(hours=8)
+QUIET = timedelta(hours=4)
 RENEW = timedelta(days=60)
 CHECKOUT = Path(__file__).resolve().parent
 STATE = Path.home() / ".local/state/meshcore-testflight.json"
