@@ -91,13 +91,6 @@ jobs:
           SHA: ${{ inputs.sha }}
           BUILD: ${{ inputs.build }}
         run: |
-          # masicai's ONNX Runtime package downloads its extensions archive from download.onnxruntime.ai,
-          # which is dead (masicai/onnxruntime-swift-package-manager has no fix yet). Our fork hosts the
-          # same archive. Xcode ignores SwiftPM mirror files, so point the plugin at the fork directly.
-          flutter pub get
-          plugin="$(ls -d "$PUB_CACHE"/hosted/pub.dev/flutter_onnxruntime-*/ios/flutter_onnxruntime)/Package.swift"
-          sed -i '' s#github.com/masicai/onnxruntime-swift-package-manager#github.com/ahalekelly/onnxruntime-swift-package-manager# "$plugin"
-          grep -q github.com/ahalekelly/onnxruntime-swift-package-manager "$plugin"
           key="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
           printf '%s\n' "$ASC_KEY_P8" > "$key"
           version=$(sed -n 's/^version: *\([0-9.]*\).*/\1/p' pubspec.yaml)
